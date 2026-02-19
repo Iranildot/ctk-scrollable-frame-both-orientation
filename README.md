@@ -98,3 +98,9 @@ scroll_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
 This component allows you to create grids, tables, and large layouts
 with excellent layout and UX control in CustomTkinter.
+
+------------------------------------------------------------------------
+
+## Exemple 1
+
+https://github.com/user-attachments/assets/68f056be-01b6-472c-8af3-f196ca4a28bb
