@@ -4,6 +4,7 @@ ctk_scrollable_frame_ext.py
 Extended CTkScrollableFrame with support for:
   - orientation = "vertical" | "horizontal" | "both"
   - content_anchor = "nw" | "n" | "ne" | "w" | "center" | "e" | "sw" | "s" | "se"
+  - Dynamic theme changes (suporta mudanças de tema em tempo real)
 
 Usage:
     from ctk_scrollable_frame_ext import CTkScrollableFrameExt
@@ -20,6 +21,9 @@ Usage:
 
     # Change anchor at runtime:
     frame.configure(content_anchor="se")
+    
+    # Mudar tema em tempo real (agora funciona):
+    ctk.set_appearance_mode("dark")  # a cor do canvas será atualizada automaticamente
 """
 
 from typing import Union, Tuple, Optional, Literal, Any
@@ -97,6 +101,7 @@ class CTkScrollableFrameExt(tkinter.Frame):
         self._shift_pressed = False
         self._label_text = label_text
         self._destroying = False  # anti-recursion flag for destroy
+        self._theme_update_scheduled = False  # Evita múltiplas atualizações de tema
 
         # ── Outer frame (border + background color) ───────────────────────────
         self._parent_frame = ctk.CTkFrame(
@@ -187,6 +192,44 @@ class CTkScrollableFrameExt(tkinter.Frame):
         self.bind_all("<KeyPress-Shift_R>",   self._keyboard_shift_press_all,   add="+")
         self.bind_all("<KeyRelease-Shift_L>", self._keyboard_shift_release_all, add="+")
         self.bind_all("<KeyRelease-Shift_R>", self._keyboard_shift_release_all, add="+")
+
+        # ── Monitorar mudanças de tema ───────────────────────────────────────
+        # Verifica a cada 100ms se o tema mudou (método utilizado pelo CustomTkinter)
+        self._schedule_theme_check()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Theme monitoring (NEW)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _schedule_theme_check(self):
+        """Agenda uma verificação de mudança de tema."""
+        if not self._destroying:
+            try:
+                self._check_theme_changed()
+                self.after(100, self._schedule_theme_check)
+            except tkinter.TclError:
+                pass  # Widget foi destruído
+
+    def _check_theme_changed(self):
+        """Verifica se o tema mudou e sincroniza as cores se necessário."""
+        # Pega a cor atual do CTkFrame (que responde a mudanças de tema)
+        current_fg = self._parent_frame.cget("fg_color")
+        
+        # Compara com a cor armazenada no canvas
+        canvas_color = self._parent_canvas.cget("bg")
+        
+        # Converte a cor do CTkFrame para o formato esperado
+        expected_color = self._parent_frame.cget("bg_color")
+        if expected_color == "transparent":
+            expected_color = current_fg
+        
+        if isinstance(expected_color, (list, tuple)):
+            mode = ctk.get_appearance_mode()
+            expected_color = expected_color[0] if mode == "Light" else expected_color[1]
+        
+        # Se as cores não correspondem, sincroniza
+        if canvas_color != expected_color:
+            self._sync_bg()
 
     # ══════════════════════════════════════════════════════════════════════════
     # Destroy without recursion
