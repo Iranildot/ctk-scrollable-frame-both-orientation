@@ -62,6 +62,7 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
 
         self._desired_width = width
         self._desired_height = height
+        self._destroying = False  # ← NOVO: Flag para evitar recursão na destruição
 
         self._parent_frame = CTkFrame(master=master, width=0, height=0, corner_radius=corner_radius,
                                       border_width=border_width, bg_color=bg_color, fg_color=fg_color,
@@ -137,7 +138,59 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
 
         self._shift_pressed = False
 
-    # ── Anchor ────────────────────────────────────────────────────────────────
+        # ── NOVO: Monitorar mudanças de tema ──────────────────────────────
+        self._schedule_theme_check()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # NOVO: Theme monitoring
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _schedule_theme_check(self):
+        """Agenda uma verificação de mudança de tema (a cada 100ms)."""
+        if not self._destroying:
+            try:
+                self._check_theme_changed()
+                self.after(100, self._schedule_theme_check)
+            except tkinter.TclError:
+                pass  # Widget foi destruído
+
+    def _check_theme_changed(self):
+        """
+        Verifica se o tema mudou comparando a cor do CTkFrame (que responde a temas)
+        com a cor atual do Canvas. Se diferem, sincroniza.
+        """
+        try:
+            # Obtém a cor atual do CTkFrame (responde a mudanças de tema)
+            current_fg = self._parent_frame.cget("fg_color")
+            
+            # Obtém a cor armazenada no Canvas
+            canvas_color = self._parent_canvas.cget("bg")
+            
+            # Calcula qual deveria ser a cor esperada do canvas
+            if current_fg == "transparent":
+                expected_color = self._apply_appearance_mode(self._parent_frame.cget("bg_color"))
+            else:
+                expected_color = self._apply_appearance_mode(current_fg)
+            
+            # Se as cores não correspondem, sincroniza
+            if canvas_color != expected_color:
+                self._sync_canvas_bg()
+        except tkinter.TclError:
+            pass  # Widget foi destruído
+
+    def _sync_canvas_bg(self):
+        """Sincroniza a cor de fundo do Canvas com a cor atual do CTkFrame."""
+        if self._parent_frame.cget("fg_color") == "transparent":
+            new_bg = self._apply_appearance_mode(self._parent_frame.cget("bg_color"))
+        else:
+            new_bg = self._apply_appearance_mode(self._parent_frame.cget("fg_color"))
+        
+        tkinter.Frame.configure(self, bg=new_bg)
+        self._parent_canvas.configure(bg=new_bg)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Anchor
+    # ══════════════════════════════════════════════════════════════════════════
 
     def _apply_content_anchor(self):
         """
@@ -167,12 +220,32 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
     def _on_frame_configure(self, event=None):
         self._apply_content_anchor()
 
-    # ── Grid ──────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # Grid
+    # ══════════════════════════════════════════════════════════════════════════
 
     def destroy(self):
-        tkinter.Frame.destroy(self)
-        CTkAppearanceModeBaseClass.destroy(self)
-        CTkScalingBaseClass.destroy(self)
+        """
+        Destruição segura que evita recursão.
+        """
+        if self._destroying:
+            return
+        self._destroying = True
+
+        try:
+            tkinter.Frame.destroy(self)
+        except tkinter.TclError:
+            pass
+
+        try:
+            CTkAppearanceModeBaseClass.destroy(self)
+        except (tkinter.TclError, AttributeError):
+            pass
+
+        try:
+            CTkScalingBaseClass.destroy(self)
+        except (tkinter.TclError, AttributeError):
+            pass
 
     def _create_grid(self):
         border_spacing = self._apply_widget_scaling(
@@ -214,17 +287,14 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
             else:
                 self._label.grid_forget()
 
-    # ── Appearance / scaling ──────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # Appearance / scaling
+    # ══════════════════════════════════════════════════════════════════════════
 
     def _set_appearance_mode(self, mode_string):
         super()._set_appearance_mode(mode_string)
-
-        if self._parent_frame.cget("fg_color") == "transparent":
-            tkinter.Frame.configure(self, bg=self._apply_appearance_mode(self._parent_frame.cget("bg_color")))
-            self._parent_canvas.configure(bg=self._apply_appearance_mode(self._parent_frame.cget("bg_color")))
-        else:
-            tkinter.Frame.configure(self, bg=self._apply_appearance_mode(self._parent_frame.cget("fg_color")))
-            self._parent_canvas.configure(bg=self._apply_appearance_mode(self._parent_frame.cget("fg_color")))
+        # ← MODIFICADO: Agora usa _sync_canvas_bg() em vez de código duplicado
+        self._sync_canvas_bg()
 
     def _set_scaling(self, new_widget_scaling, new_window_scaling):
         super()._set_scaling(new_widget_scaling, new_window_scaling)
@@ -240,7 +310,9 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
         self._parent_canvas.configure(width=self._apply_widget_scaling(self._desired_width),
                                       height=self._apply_widget_scaling(self._desired_height))
 
-    # ── Configure / cget ─────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # Configure / cget
+    # ══════════════════════════════════════════════════════════════════════════
 
     def configure(self, **kwargs):
         if "width" in kwargs:
@@ -270,12 +342,8 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
 
         if "fg_color" in kwargs:
             self._parent_frame.configure(fg_color=kwargs.pop("fg_color"))
-            if self._parent_frame.cget("fg_color") == "transparent":
-                tkinter.Frame.configure(self, bg=self._apply_appearance_mode(self._parent_frame.cget("bg_color")))
-                self._parent_canvas.configure(bg=self._apply_appearance_mode(self._parent_frame.cget("bg_color")))
-            else:
-                tkinter.Frame.configure(self, bg=self._apply_appearance_mode(self._parent_frame.cget("fg_color")))
-                self._parent_canvas.configure(bg=self._apply_appearance_mode(self._parent_frame.cget("fg_color")))
+            # ← MODIFICADO: Agora usa _sync_canvas_bg() em vez de código duplicado
+            self._sync_canvas_bg()
             for child in self.winfo_children():
                 if isinstance(child, CTkBaseClass):
                     child.configure(bg_color=self._parent_frame.cget("fg_color"))
@@ -343,7 +411,9 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
         else:
             return self._parent_frame.cget(attribute_name)
 
-    # ── Canvas / frame fit ────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # Canvas / frame fit
+    # ══════════════════════════════════════════════════════════════════════════
 
     def _fit_frame_dimensions_to_canvas(self, event):
         if self._orientation == "horizontal":
@@ -354,7 +424,9 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
 
         self._apply_content_anchor()
 
-    # ── Scrolling ────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # Scrolling
+    # ══════════════════════════════════════════════════════════════════════════
 
     def _set_scroll_increments(self):
         if sys.platform.startswith("win"):
@@ -403,7 +475,9 @@ class CTkScrollableFrame(tkinter.Frame, CTkAppearanceModeBaseClass, CTkScalingBa
         else:
             return False
 
-    # ── Geometry proxies ─────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # Geometry proxies
+    # ══════════════════════════════════════════════════════════════════════════
 
     def pack(self, **kwargs):
         self._parent_frame.pack(**kwargs)
